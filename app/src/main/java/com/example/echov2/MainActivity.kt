@@ -9,13 +9,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
@@ -48,6 +52,9 @@ val EchoSubtextGray = Color(0xFF6C8793)
 // Image URL Placeholders
 const val promptQuestionBgUrl = "https://static.wixstatic.com/media/0cbe0e_13594cad56364c2eb39a63e87e8b3ca0~mv2.png/v1/fill/w_412,h_890,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/Echo%20Mobile%20UI%20(12).png"
 const val headerRobotImageUrl = "https://static.wixstatic.com/media/0cbe0e_3514bb0897164745bfd2ee85db385309~mv2.png/v1/fill/w_1200,h_676,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/I%20see%20it%20I%20like%20it%20I%20want%20it%20I%20got%20it.png"
+
+// Home Screen Image Placeholders
+const val bannerChatImageUrl = "https://static.wixstatic.com/media/0cbe0e_3514bb0897164745bfd2ee85db385309~mv2.png/v1/fill/w_1200,h_676,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/I%20see%20it%20I%20like%20it%20I%20want%20it%20I%20got%20it.png"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -500,19 +507,276 @@ fun TermsCheckbox(isAgreed: Boolean, onCheckedChange: (Boolean) -> Unit) {
     }
 }
 
+// SCREEN 4: Home Dashboard Screen
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EchoHomeScreen() {
+    val context = LocalContext.current
+    var userName by remember { mutableStateOf("User") }
+
+    // Fetch User's name from Firestore on launch
+    LaunchedEffect(Unit) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (uid != null) {
+            FirebaseFirestore.getInstance().collection("users").document(uid)
+                .get()
+                .addOnSuccessListener { document ->
+                    if (document != null && document.exists()) {
+                        val fetchedName = document.getString("fullName")
+                        if (!fetchedName.isNullOrEmpty()) {
+                            userName = fetchedName
+                        }
+                    }
+                }
+        }
+    }
+
+    Scaffold(
+        containerColor = Color(0xFFF4F7FF)
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
+        ) {
+            // --- TOP BLUE HEADER ---
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        color = EchoBlueHeader,
+                        shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
+                    )
+                    .padding(20.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Welcome back,",
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                text = userName,
+                                color = Color.White,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // Top Header Action Buttons (Shopping & Notifications)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Place real image URLs or drawable references below
+                            HeaderIconButtonUrl(
+                                imageUrl = "https://via.placeholder.com/40/003859/FFFFFF?text=Bag",
+                                onClick = { Toast.makeText(context, "Shopping Clicked", Toast.LENGTH_SHORT).show() }
+                            )
+                            HeaderIconButtonUrl(
+                                imageUrl = "https://via.placeholder.com/40/003859/FFFFFF?text=Bell",
+                                onClick = { Toast.makeText(context, "Notifications Clicked", Toast.LENGTH_SHORT).show() }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Search Bar & Settings Button Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = "",
+                            onValueChange = {},
+                            placeholder = { Text("Search Here", color = Color.Gray) },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp),
+                            shape = RoundedCornerShape(25.dp),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.White,
+                                unfocusedContainerColor = Color.White,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent
+                            ),
+                            singleLine = true,
+                            enabled = false
+                        )
+
+                        HeaderIconButtonUrl(
+                            imageUrl = "https://via.placeholder.com/40/003859/FFFFFF?text=Set",
+                            onClick = { Toast.makeText(context, "Settings Clicked", Toast.LENGTH_SHORT).show() }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                // --- BANNER BUTTON ("Hey There! Wanna chat?") ---
+                // Replace `bannerChatImageUrl` with your image address or local drawable
+                AsyncImage(
+                    model ="https://static.wixstatic.com/media/0cbe0e_f460b76d704b4f40863e8547ed75060b~mv2.png/v1/fill/w_787,h_302,al_c,lg_1,q_85,enc_avif,quality_auto/0cbe0e_f460b76d704b4f40863e8547ed75060b~mv2.png",
+                    contentDescription = "Hey There! Wanna chat?",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(130.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { Toast.makeText(context, "Opening Chat...", Toast.LENGTH_SHORT).show() },
+                    contentScale = ContentScale.Crop
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // --- 6 FEATURE BUTTONS GRID ---
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        FeatureGridItemUrl(
+                            modifier = Modifier.weight(1f),
+                            iconUrl = "https://via.placeholder.com/100/0066FF/FFFFFF?text=Games",
+                            title = "Games",
+                            onClick = { Toast.makeText(context, "Games Clicked", Toast.LENGTH_SHORT).show() }
+                        )
+                        FeatureGridItemUrl(
+                            modifier = Modifier.weight(1f),
+                            iconUrl = "https://via.placeholder.com/100/0066FF/FFFFFF?text=Club",
+                            title = "Clubhouse",
+                            onClick = { Toast.makeText(context, "Clubhouse Clicked", Toast.LENGTH_SHORT).show() }
+                        )
+                        FeatureGridItemUrl(
+                            modifier = Modifier.weight(1f),
+                            iconUrl = "https://via.placeholder.com/100/0066FF/FFFFFF?text=Board",
+                            title = "Leaderboard",
+                            onClick = { Toast.makeText(context, "Leaderboard Clicked", Toast.LENGTH_SHORT).show() }
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        FeatureGridItemUrl(
+                            modifier = Modifier.weight(1f),
+                            iconUrl = "https://via.placeholder.com/100/0066FF/FFFFFF?text=Remind",
+                            title = "Reminders",
+                            onClick = { Toast.makeText(context, "Reminders Clicked", Toast.LENGTH_SHORT).show() }
+                        )
+                        FeatureGridItemUrl(
+                            modifier = Modifier.weight(1f),
+                            iconUrl = "https://via.placeholder.com/100/0066FF/FFFFFF?text=Stories",
+                            title = "Stories",
+                            onClick = { Toast.makeText(context, "Stories Clicked", Toast.LENGTH_SHORT).show() }
+                        )
+                        FeatureGridItemUrl(
+                            modifier = Modifier.weight(1f),
+                            iconUrl = "https://via.placeholder.com/100/0066FF/FFFFFF?text=Jokes",
+                            title = "Jokes",
+                            onClick = { Toast.makeText(context, "Jokes Clicked", Toast.LENGTH_SHORT).show() }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // --- QUOTES CAROUSEL (4 Image Cards) ---
+                val quoteImageUrls = listOf(
+                    "https://static.wixstatic.com/media/0cbe0e_c2e41586762448feb628d27bc66cfdcb~mv2.png/v1/fill/w_424,h_240,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/0cbe0e_c2e41586762448feb628d27bc66cfdcb~mv2.png",
+                    "https://static.wixstatic.com/media/0cbe0e_6789842d789d4f4faae4d78babd083cd~mv2.png/v1/fill/w_424,h_240,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/0cbe0e_6789842d789d4f4faae4d78babd083cd~mv2.png",
+                    "https://static.wixstatic.com/media/0cbe0e_2050ea3787c349a4ae5950d80921b007~mv2.png/v1/fill/w_424,h_240,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/0cbe0e_2050ea3787c349a4ae5950d80921b007~mv2.png",
+                    "https://static.wixstatic.com/media/0cbe0e_fcd95cd343b4468ab5bf92a0a8e3b495~mv2.png/v1/fill/w_424,h_240,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/0cbe0e_fcd95cd343b4468ab5bf92a0a8e3b495~mv2.png"
+                )
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(quoteImageUrls) { quoteUrl ->
+                        AsyncImage(
+                            model = quoteUrl,
+                            contentDescription = "Quote Card",
+                            modifier = Modifier
+                                .width(300.dp)
+                                .height(140.dp)
+                                .clip(RoundedCornerShape(16.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+    }
+}
+
+// Helpers for image rendering via URL
+@Composable
+fun HeaderIconButtonUrl(imageUrl: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .fillMaxSize()
-            .background(Color.White),
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.2f))
+            .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = "Welcome to Echo Home!",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            color = EchoDarkBlueButton
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = null,
+            modifier = Modifier.size(24.dp)
         )
     }
+}
+
+@Composable
+fun FeatureGridItemUrl(
+    modifier: Modifier = Modifier,
+    iconUrl: String,
+    title: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = modifier
+            .height(100.dp)
+            .clickable { onClick() },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            AsyncImage(
+                model = iconUrl,
+                contentDescription = title,
+                modifier = Modifier.size(36.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFF333333)
+            )
+        }
+    }
+}
+
+// Helper extension function to safely check null or empty strings
+private fun String?.isNull_orEmpty(): Boolean {
+    return this == null || this.trim().isEmpty()
 }
