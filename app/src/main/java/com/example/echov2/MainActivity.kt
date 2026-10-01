@@ -42,14 +42,12 @@ import com.google.firebase.firestore.FirebaseFirestore
 // Colors matching the design
 val EchoBlueHeader = Color(0xFF0066FF)
 val EchoDarkBlueButton = Color(0xFF003859)
-val EchoGoogleBlue = Color(0xFF0F6EFF)
 val EchoInputFieldBorder = Color(0xFF0B3C4D)
 val EchoSubtextGray = Color(0xFF6C8793)
 
 // Image URL Placeholders
 const val promptQuestionBgUrl = "https://static.wixstatic.com/media/0cbe0e_13594cad56364c2eb39a63e87e8b3ca0~mv2.png/v1/fill/w_412,h_890,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/Echo%20Mobile%20UI%20(12).png"
 const val headerRobotImageUrl = "https://static.wixstatic.com/media/0cbe0e_3514bb0897164745bfd2ee85db385309~mv2.png/v1/fill/w_1200,h_676,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/I%20see%20it%20I%20like%20it%20I%20want%20it%20I%20got%20it.png"
-const val googleLogoUrl = "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/3840px-Google_%22G%22_logo.svg.png?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=thumbnail"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,7 +65,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun EchoNavigationFlow() {
-    var flowStep by remember { mutableStateOf(0) }
+    var flowStep by remember { mutableIntStateOf(0) }
 
     val screen1Url = "https://static.wixstatic.com/media/0cbe0e_f8215ad577eb4f619730bb050a85adb7~mv2.png/v1/fill/w_500,h_1082,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/Echo%20Mobile%20UI%20(5).png"
     val swipeImages = listOf(
@@ -266,10 +264,6 @@ fun SignInScreen(onNavigateToSignUp: () -> Unit, onLoginSuccess: () -> Unit) {
             Text(text = if (isLoading) "Signing in..." else "Sign in", fontSize = 18.sp, color = Color.White)
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        GoogleSignInButton(text = "Sign Up with Google")
-
         Spacer(modifier = Modifier.height(24.dp))
 
         Box(
@@ -397,10 +391,6 @@ fun SignUpScreen(onNavigateToSignIn: () -> Unit, onSignUpSuccess: () -> Unit) {
             Text(text = if (isLoading) "Creating..." else "Sign Up", fontSize = 18.sp, color = Color.White)
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        GoogleSignInButton(text = "Sign Up with Google")
-
         Spacer(modifier = Modifier.height(24.dp))
 
         Box(
@@ -507,31 +497,6 @@ fun TermsCheckbox(isAgreed: Boolean, onCheckedChange: (Boolean) -> Unit) {
             fontSize = 13.sp,
             color = Color.DarkGray
         )
-    }
-}
-
-@Composable
-fun GoogleSignInButton(text: String) {
-    Button(
-        onClick = { /* Google Auth integration target */ },
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp),
-        shape = RoundedCornerShape(28.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = EchoGoogleBlue)
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            AsyncImage(
-                model = googleLogoUrl,
-                contentDescription = "Google Logo",
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(text = text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-        }
     }
 }
 
