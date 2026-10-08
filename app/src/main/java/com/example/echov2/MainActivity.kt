@@ -1,11 +1,21 @@
 package com.example.echov2
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,6 +49,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -52,10 +65,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
+import java.util.Locale
+import kotlin.math.sin
 
 // Colors matching the design
 val EchoBlueHeader = Color(0xFF0066FF)
@@ -165,7 +181,6 @@ fun SwipeSection(imageUrls: List<String>, onFinishedSwiping: () -> Unit) {
     }
 }
 
-// SCREEN 1: Fullscreen Prompt Screen
 @Composable
 fun AccountPromptScreen(onYesClicked: () -> Unit, onNoClicked: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize()) {
@@ -208,7 +223,6 @@ fun AccountPromptScreen(onYesClicked: () -> Unit, onNoClicked: () -> Unit) {
     }
 }
 
-// SCREEN 2: Sign In Page
 @Composable
 fun SignInScreen(onNavigateToSignUp: () -> Unit, onLoginSuccess: () -> Unit) {
     var email by remember { mutableStateOf("") }
@@ -310,7 +324,6 @@ fun SignInScreen(onNavigateToSignUp: () -> Unit, onLoginSuccess: () -> Unit) {
     }
 }
 
-// SCREEN 3: Create Account Page
 @Composable
 fun SignUpScreen(onNavigateToSignIn: () -> Unit, onSignUpSuccess: () -> Unit) {
     var fullName by remember { mutableStateOf("") }
@@ -522,7 +535,6 @@ fun TermsCheckbox(isAgreed: Boolean, onCheckedChange: (Boolean) -> Unit) {
     }
 }
 
-// SCREEN 4: Home Dashboard Screen
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EchoHomeScreen(onOpenChat: () -> Unit = {}) {
@@ -561,7 +573,6 @@ fun EchoHomeScreen(onOpenChat: () -> Unit = {}) {
                         color = EchoBlueHeader,
                         shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
                     )
-                    .statusBarsPadding()
                     .padding(20.dp)
             ) {
                 Column {
@@ -728,7 +739,9 @@ fun EchoHomeScreen(onOpenChat: () -> Unit = {}) {
     }
 }
 
-// SCREEN 5: CHAT & VOICE SYSTEM
+// ==========================================
+// SCREEN 5: CHAT & VOICE SYSTEM WITH STT & TTS
+// ==========================================
 
 enum class ChatMode { CHAT, VOICE }
 
@@ -742,51 +755,291 @@ data class Message(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EchoChatScreen(onBackClicked: () -> Unit) {
+    val context = LocalContext.current
     var activeMode by remember { mutableStateOf(ChatMode.VOICE) }
     var inputText by remember { mutableStateOf("") }
+    var isListening by remember { mutableStateOf(false) }
+    var isSpeaking by remember { mutableStateOf(false) }
+
     val messages = remember {
         mutableStateListOf(
-            Message(text = "Hello! I'm Echo, your AI Companion. How can I brighten your day today?", isUser = false, timestamp = "10:00 AM"),
-            Message(text = "Can you tell me a quick uplifting quote?", isUser = true, timestamp = "10:01 AM"),
-            Message(text = "Absolutely! 'Every morning brings new potential, but only if you choose to take the first step.' 😊", isUser = false, timestamp = "10:01 AM")
+            Message(
+                text = "Hello! I'm Echo, your AI Companion. How can I brighten your day today?",
+                isUser = false,
+                timestamp = "10:00 AM"
+            )
         )
     }
 
-    val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    fun sendMessage() {
-        if (inputText.isNotBlank()) {
-            val userMsg = Message(text = inputText.trim(), isUser = true, timestamp = "Just now")
-            messages.add(userMsg)
-            val textToRespond = inputText
-            inputText = ""
+    // =========================================================
+    // TEXT TO SPEECH
+    // =========================================================
+    var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
+    var ttsReady by remember { mutableStateOf(false) }
 
-            coroutineScope.launch {
-                listState.animateScrollToItem(messages.size - 1)
-            }
+    DisposableEffect(context) {
+        lateinit var tts: TextToSpeech
 
-            coroutineScope.launch {
-                kotlinx.coroutines.delay(1000)
-                messages.add(
-                    Message(
-                        text = "I'm right here with you! You said: '$textToRespond'",
-                        isUser = false,
-                        timestamp = "Just now"
+        tts = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val languageResult = tts.setLanguage(Locale.US)
+
+                if (languageResult == TextToSpeech.LANG_MISSING_DATA ||
+                    languageResult == TextToSpeech.LANG_NOT_SUPPORTED
+                ) {
+                    ttsReady = false
+                    android.util.Log.e(
+                        "EchoTTS",
+                        "English TTS language is missing or unsupported"
                     )
+                } else {
+                    ttsEngine = tts
+                    ttsReady = true
+
+                    tts.setOnUtteranceProgressListener(
+                        object : android.speech.tts.UtteranceProgressListener() {
+                            override fun onStart(utteranceId: String?) {
+                                isSpeaking = true
+                                android.util.Log.d(
+                                    "EchoTTS",
+                                    "Started speaking: $utteranceId"
+                                )
+                            }
+
+                            override fun onDone(utteranceId: String?) {
+                                isSpeaking = false
+                                android.util.Log.d(
+                                    "EchoTTS",
+                                    "Finished speaking: $utteranceId"
+                                )
+                            }
+
+                            override fun onError(utteranceId: String?) {
+                                isSpeaking = false
+                                android.util.Log.e(
+                                    "EchoTTS",
+                                    "TTS error: $utteranceId"
+                                )
+                            }
+                        }
+                    )
+
+                    android.util.Log.d("EchoTTS", "TTS initialized successfully")
+                }
+            } else {
+                ttsReady = false
+                android.util.Log.e(
+                    "EchoTTS",
+                    "TTS initialization failed: $status"
                 )
-                listState.animateScrollToItem(messages.size - 1)
             }
+        }
+
+        onDispose {
+            tts.stop()
+            tts.shutdown()
+            ttsEngine = null
+            ttsReady = false
         }
     }
 
+    // Speak the EXACT transcription. No AI is involved.
+    fun speakOutLoud(text: String) {
+        val cleanText = text.trim()
+
+        if (cleanText.isBlank()) return
+
+        val tts = ttsEngine
+
+        if (tts == null || !ttsReady) {
+            android.util.Log.e(
+                "EchoTTS",
+                "TTS not ready. tts=$tts, ready=$ttsReady"
+            )
+            Toast.makeText(
+                context,
+                "Text-to-speech is not ready",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
+        val result = tts.speak(
+            cleanText,
+            TextToSpeech.QUEUE_FLUSH,
+            null,
+            "EchoRepeat"
+        )
+
+        android.util.Log.d(
+            "EchoTTS",
+            "Repeating exact transcription: \"$cleanText\" | result=$result"
+        )
+    }
+
+    // =========================================================
+    // SPEECH TO TEXT
+    // =========================================================
+    val speechRecognizer = remember {
+        SpeechRecognizer.createSpeechRecognizer(context)
+    }
+
+    val speechIntent = remember {
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE,
+                Locale.getDefault()
+            )
+            putExtra(
+                RecognizerIntent.EXTRA_MAX_RESULTS,
+                1
+            )
+        }
+    }
+
+    fun handleTranscription(transcribedText: String) {
+        val cleanText = transcribedText.trim()
+
+        if (cleanText.isBlank()) return
+
+        messages.add(
+            Message(
+                text = cleanText,
+                isUser = true,
+                timestamp = "Just now"
+            )
+        )
+
+        android.util.Log.d(
+            "EchoSTT",
+            "Transcription: \"$cleanText\""
+        )
+
+        speakOutLoud(cleanText)
+    }
+
+    DisposableEffect(Unit) {
+        speechRecognizer.setRecognitionListener(
+            object : RecognitionListener {
+
+                override fun onReadyForSpeech(params: Bundle?) {
+                    isListening = true
+                    android.util.Log.d("EchoSTT", "Ready for speech")
+                }
+
+                override fun onBeginningOfSpeech() {
+                    android.util.Log.d("EchoSTT", "Speech started")
+                }
+
+                override fun onRmsChanged(rmsdB: Float) {}
+
+                override fun onBufferReceived(buffer: ByteArray?) {}
+
+                override fun onEndOfSpeech() {
+                    isListening = false
+                    android.util.Log.d("EchoSTT", "Speech ended")
+                }
+
+                override fun onError(error: Int) {
+                    isListening = false
+
+                    android.util.Log.e(
+                        "EchoSTT",
+                        "SpeechRecognizer error code: $error"
+                    )
+
+                    Toast.makeText(
+                        context,
+                        "Couldn't understand the speech. Please try again.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+                override fun onResults(results: Bundle?) {
+                    isListening = false
+
+                    val matches =
+                        results?.getStringArrayList(
+                            SpeechRecognizer.RESULTS_RECOGNITION
+                        )
+
+                    if (!matches.isNullOrEmpty()) {
+                        handleTranscription(matches[0])
+                    } else {
+                        android.util.Log.e(
+                            "EchoSTT",
+                            "SpeechRecognizer returned no transcription"
+                        )
+                    }
+                }
+
+                override fun onPartialResults(partialResults: Bundle?) {}
+
+                override fun onEvent(
+                    eventType: Int,
+                    params: Bundle?
+                ) {}
+            }
+        )
+
+        onDispose {
+            speechRecognizer.destroy()
+        }
+    }
+
+    // =========================================================
+    // MICROPHONE PERMISSION
+    // =========================================================
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            speechRecognizer.startListening(speechIntent)
+        } else {
+            Toast.makeText(
+                context,
+                "Microphone permission is required for Voice Mode",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    fun startListeningWithPermission() {
+        if (
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            ttsEngine?.stop()
+            isSpeaking = false
+
+            speechRecognizer.startListening(speechIntent)
+        } else {
+            permissionLauncher.launch(
+                Manifest.permission.RECORD_AUDIO
+            )
+        }
+    }
+
+    // =========================================================
+    // UI
+    // =========================================================
     Scaffold(
         containerColor = EchoBgLight,
         topBar = {
             Surface(
                 color = EchoBlueHeader,
                 shadowElevation = 4.dp,
-                modifier = Modifier.statusBarsPadding()
+                modifier = Modifier
+                    .statusBarsPadding()
+                    .padding(top = 8.dp)
             ) {
                 Column {
                     Row(
@@ -813,13 +1066,18 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
                                     .background(Color.White),
                                 contentScale = ContentScale.Crop
                             )
+
                             Box(
                                 modifier = Modifier
                                     .size(12.dp)
                                     .clip(CircleShape)
                                     .background(Color(0xFF4CAF50))
                                     .align(Alignment.BottomEnd)
-                                    .border(1.5.dp, EchoBlueHeader, CircleShape)
+                                    .border(
+                                        1.5.dp,
+                                        EchoBlueHeader,
+                                        CircleShape
+                                    )
                             )
                         }
 
@@ -827,13 +1085,17 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Echo AI",
+                                text = "Echo",
                                 color = Color.White,
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold
                             )
+
                             Text(
-                                text = if (activeMode == ChatMode.CHAT) "Online • Ready to chat" else "Voice Mode Active",
+                                text = if (activeMode == ChatMode.CHAT)
+                                    "Online • Ready to chat"
+                                else
+                                    "Voice Mode Active",
                                 color = Color.White.copy(alpha = 0.8f),
                                 fontSize = 12.sp
                             )
@@ -842,7 +1104,7 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
                         IconButton(onClick = { }) {
                             Icon(
                                 imageVector = Icons.Default.MoreVert,
-                                contentDescription = "Options",
+                                contentDescription = "More",
                                 tint = Color.White
                             )
                         }
@@ -862,6 +1124,7 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
                 .padding(paddingValues)
         ) {
             when (activeMode) {
+
                 ChatMode.CHAT -> {
                     Column(modifier = Modifier.fillMaxSize()) {
                         LazyColumn(
@@ -880,15 +1143,44 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
                         ChatInputBar(
                             value = inputText,
                             onValueChange = { inputText = it },
-                            onSend = { sendMessage() },
-                            onMicClicked = { activeMode = ChatMode.VOICE }
+                            onSend = {
+                                val cleanText = inputText.trim()
+
+                                if (cleanText.isNotBlank()) {
+                                    messages.add(
+                                        Message(
+                                            text = cleanText,
+                                            isUser = true,
+                                            timestamp = "Just now"
+                                        )
+                                    )
+
+                                    inputText = ""
+                                    speakOutLoud(cleanText)
+                                }
+                            },
+                            onMicClicked = {
+                                activeMode = ChatMode.VOICE
+                            }
                         )
                     }
                 }
 
                 ChatMode.VOICE -> {
                     VoiceModeScreen(
-                        onSwitchToChat = { activeMode = ChatMode.CHAT }
+                        isListening = isListening,
+                        isSpeaking = isSpeaking,
+                        onRecordClick = {
+                            if (isListening) {
+                                speechRecognizer.stopListening()
+                                isListening = false
+                            } else {
+                                startListeningWithPermission()
+                            }
+                        },
+                        onSwitchToChat = {
+                            activeMode = ChatMode.CHAT
+                        }
                     )
                 }
             }
@@ -1058,16 +1350,71 @@ fun ChatInputBar(
     }
 }
 
-// Voice Mode Screen Component with Animated Audio Wave visualizer
+// Dynamic Audio Waves Animation Component
 @Composable
-fun VoiceModeScreen(onSwitchToChat: () -> Unit) {
-    var isListening by remember { mutableStateOf(false) }
+fun AudioWaveformAnimation(
+    isActive: Boolean,
+    modifier: Modifier = Modifier,
+    barColor: Color = EchoBlueHeader
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "WaveAnimation")
+
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 2f * Math.PI.toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "WavePhase"
+    )
+
+    Canvas(modifier = modifier) {
+        val barCount = 11
+        val barWidth = 4.dp.toPx()
+        val spacing = 10.dp.toPx()
+        val totalWidth = barCount * barWidth + (barCount - 1) * spacing
+        val startX = (size.width - totalWidth) / 2
+        val maxHeight = size.height
+        val minHeight = 8.dp.toPx()
+
+        for (i in 0 until barCount) {
+            val barX = startX + i * (barWidth + spacing)
+
+            val currentBarHeight = if (isActive) {
+                val offsetPhase = phase + (i * 0.6f)
+                val waveMultiplier = (sin(offsetPhase.toDouble()).toFloat() + 1f) / 2f
+                minHeight + (maxHeight - minHeight) * waveMultiplier
+            } else {
+                minHeight
+            }
+
+            val barY = (size.height - currentBarHeight) / 2
+
+            drawRoundRect(
+                color = if (isActive) barColor else barColor.copy(alpha = 0.3f),
+                topLeft = Offset(x = barX, y = barY),
+                size = Size(width = barWidth, height = currentBarHeight),
+                cornerRadius = CornerRadius(barWidth / 2, barWidth / 2)
+            )
+        }
+    }
+}
+
+// Voice Mode Screen Component
+@Composable
+fun VoiceModeScreen(
+    isListening: Boolean,
+    isSpeaking: Boolean,
+    onRecordClick: () -> Unit,
+    onSwitchToChat: () -> Unit
+) {
     var isMuted by remember { mutableStateOf(false) }
 
     val infiniteTransition = rememberInfiniteTransition(label = "Pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = if (isListening) 1.25f else 1.05f,
+        targetValue = if (isListening || isSpeaking) 1.25f else 1.05f,
         animationSpec = infiniteRepeatable(
             animation = tween(1000, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
@@ -1085,7 +1432,11 @@ fun VoiceModeScreen(onSwitchToChat: () -> Unit) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = if (isListening) "Listening..." else "Tap the mic & speak",
+                text = when {
+                    isListening -> "Listening..."
+                    isSpeaking -> "Echo is speaking..."
+                    else -> "Tap the mic & speak"
+                },
                 color = EchoDarkBlueButton,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold
@@ -1098,7 +1449,6 @@ fun VoiceModeScreen(onSwitchToChat: () -> Unit) {
             )
         }
 
-        // Central Orb Visualizer
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier.size(200.dp)
@@ -1108,7 +1458,7 @@ fun VoiceModeScreen(onSwitchToChat: () -> Unit) {
                     .size(170.dp)
                     .scale(pulseScale)
                     .clip(CircleShape)
-                    .background(EchoBlueHeader.copy(alpha = if (isListening) 0.25f else 0.1f))
+                    .background(EchoBlueHeader.copy(alpha = if (isListening || isSpeaking) 0.25f else 0.1f))
             )
 
             Card(
@@ -1117,7 +1467,7 @@ fun VoiceModeScreen(onSwitchToChat: () -> Unit) {
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
                 modifier = Modifier
                     .size(120.dp)
-                    .clickable { isListening = !isListening }
+                    .clickable { onRecordClick() }
             ) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -1135,13 +1485,16 @@ fun VoiceModeScreen(onSwitchToChat: () -> Unit) {
             }
         }
 
-        // --- ANIMATED WAVEFORM VISUALIZER BETWEEN AVATAR AND CONTROLS ---
-        AudioWaveformVisualizer(isListening = isListening)
+        AudioWaveformAnimation(
+            isActive = isListening,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+        )
 
-        // Voice Controls Row
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(bottom = 12.dp)
+            modifier = Modifier.padding(bottom = 16.dp)
         ) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
@@ -1163,7 +1516,7 @@ fun VoiceModeScreen(onSwitchToChat: () -> Unit) {
                 }
 
                 Button(
-                    onClick = { isListening = !isListening },
+                    onClick = onRecordClick,
                     modifier = Modifier.size(72.dp),
                     shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(
@@ -1195,7 +1548,7 @@ fun VoiceModeScreen(onSwitchToChat: () -> Unit) {
                 }
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             TextButton(onClick = onSwitchToChat) {
                 Text(
@@ -1209,58 +1562,6 @@ fun VoiceModeScreen(onSwitchToChat: () -> Unit) {
     }
 }
 
-// Audio Wave Visualizer Component with Dynamic Bar Animations
-@Composable
-fun AudioWaveformVisualizer(
-    isListening: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val barHeights = listOf(18.dp, 32.dp, 50.dp, 28.dp, 60.dp, 38.dp, 22.dp, 45.dp, 26.dp, 55.dp, 30.dp, 16.dp)
-
-    val infiniteTransition = rememberInfiniteTransition(label = "WaveformTransition")
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(70.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        barHeights.forEachIndexed { index, targetHeight ->
-            val duration = 400 + (index * 80) % 500
-
-            val dynamicScale by infiniteTransition.animateFloat(
-                initialValue = 0.25f,
-                targetValue = if (isListening) 1.0f else 0.25f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(durationMillis = duration, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "BarHeightAnimation_$index"
-            )
-
-            val animatedHeight = if (isListening) {
-                (targetHeight.value * dynamicScale).coerceAtLeast(6f).dp
-            } else {
-                8.dp
-            }
-
-            Box(
-                modifier = Modifier
-                    .padding(horizontal = 3.dp)
-                    .width(5.dp)
-                    .height(animatedHeight)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(
-                        if (isListening) EchoBlueHeader.copy(alpha = 0.85f)
-                        else EchoSubtextGray.copy(alpha = 0.3f)
-                    )
-            )
-        }
-    }
-}
-
-// Helpers for image rendering via URL
 @Composable
 fun HeaderIconButtonUrl(imageUrl: String, onClick: () -> Unit) {
     Box(
