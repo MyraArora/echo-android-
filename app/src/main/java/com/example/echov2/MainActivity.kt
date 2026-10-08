@@ -5,21 +5,31 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
@@ -28,33 +38,38 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
 
 // Colors matching the design
 val EchoBlueHeader = Color(0xFF0066FF)
 val EchoDarkBlueButton = Color(0xFF003859)
 val EchoInputFieldBorder = Color(0xFF0B3C4D)
 val EchoSubtextGray = Color(0xFF6C8793)
+val EchoUserBubbleColor = Color(0xFF003859)
+val EchoAiBubbleColor = Color(0xFFE8F1FF)
+val EchoBgLight = Color(0xFFF4F7FF)
 
 // Image URL Placeholders
 const val promptQuestionBgUrl = "https://static.wixstatic.com/media/0cbe0e_13594cad56364c2eb39a63e87e8b3ca0~mv2.png/v1/fill/w_412,h_890,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/Echo%20Mobile%20UI%20(12).png"
 const val headerRobotImageUrl = "https://static.wixstatic.com/media/0cbe0e_3514bb0897164745bfd2ee85db385309~mv2.png/v1/fill/w_1200,h_676,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/I%20see%20it%20I%20like%20it%20I%20want%20it%20I%20got%20it.png"
-
-// Home Screen Image Placeholders
-const val bannerChatImageUrl = "https://static.wixstatic.com/media/0cbe0e_3514bb0897164745bfd2ee85db385309~mv2.png/v1/fill/w_1200,h_676,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/I%20see%20it%20I%20like%20it%20I%20want%20it%20I%20got%20it.png"
+const val echoAvatarUrl = "https://static.wixstatic.com/media/0cbe0e_3514bb0897164745bfd2ee85db385309~mv2.png/v1/fill/w_1200,h_676,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/I%20see%20it%20I%20like%20it%20I%20want%20it%20I%20got%20it.png"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -96,7 +111,9 @@ fun EchoNavigationFlow() {
             onNavigateToSignIn = { flowStep = 3 },
             onSignUpSuccess = { flowStep = 5 }
         )
-        else -> EchoHomeScreen()
+        5 -> EchoHomeScreen(onOpenChat = { flowStep = 6 })
+        6 -> EchoChatScreen(onBackClicked = { flowStep = 5 })
+        else -> EchoHomeScreen(onOpenChat = { flowStep = 6 })
     }
 }
 
@@ -148,7 +165,7 @@ fun SwipeSection(imageUrls: List<String>, onFinishedSwiping: () -> Unit) {
     }
 }
 
-// SCREEN 1: Fullscreen Prompt Screen with Yes/No Buttons
+// SCREEN 1: Fullscreen Prompt Screen
 @Composable
 fun AccountPromptScreen(onYesClicked: () -> Unit, onNoClicked: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize()) {
@@ -420,8 +437,6 @@ fun SignUpScreen(onNavigateToSignIn: () -> Unit, onSignUpSuccess: () -> Unit) {
     }
 }
 
-// REUSABLE COMPONENTS
-
 @Composable
 fun AuthLayout(headerImage: String, content: @Composable ColumnScope.() -> Unit) {
     Box(
@@ -510,11 +525,10 @@ fun TermsCheckbox(isAgreed: Boolean, onCheckedChange: (Boolean) -> Unit) {
 // SCREEN 4: Home Dashboard Screen
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EchoHomeScreen() {
+fun EchoHomeScreen(onOpenChat: () -> Unit = {}) {
     val context = LocalContext.current
     var userName by remember { mutableStateOf("User") }
 
-    // Fetch User's name from Firestore on launch
     LaunchedEffect(Unit) {
         val uid = FirebaseAuth.getInstance().currentUser?.uid
         if (uid != null) {
@@ -532,7 +546,7 @@ fun EchoHomeScreen() {
     }
 
     Scaffold(
-        containerColor = Color(0xFFF4F7FF)
+        containerColor = EchoBgLight
     ) { paddingValues ->
         Column(
             modifier = Modifier
@@ -540,7 +554,6 @@ fun EchoHomeScreen() {
                 .padding(paddingValues)
                 .verticalScroll(rememberScrollState())
         ) {
-            // --- TOP BLUE HEADER ---
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -548,6 +561,7 @@ fun EchoHomeScreen() {
                         color = EchoBlueHeader,
                         shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
                     )
+                    .statusBarsPadding()
                     .padding(20.dp)
             ) {
                 Column {
@@ -570,9 +584,7 @@ fun EchoHomeScreen() {
                             )
                         }
 
-                        // Top Header Action Buttons (Shopping & Notifications)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // Place real image URLs or drawable references below
                             HeaderIconButtonUrl(
                                 imageUrl = "https://via.placeholder.com/40/003859/FFFFFF?text=Bag",
                                 onClick = { Toast.makeText(context, "Shopping Clicked", Toast.LENGTH_SHORT).show() }
@@ -586,7 +598,6 @@ fun EchoHomeScreen() {
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Search Bar & Settings Button Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -622,22 +633,19 @@ fun EchoHomeScreen() {
             Spacer(modifier = Modifier.height(16.dp))
 
             Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-                // --- BANNER BUTTON ("Hey There! Wanna chat?") ---
-                // Replace `bannerChatImageUrl` with your image address or local drawable
                 AsyncImage(
-                    model ="https://static.wixstatic.com/media/0cbe0e_f460b76d704b4f40863e8547ed75060b~mv2.png/v1/fill/w_787,h_302,al_c,lg_1,q_85,enc_avif,quality_auto/0cbe0e_f460b76d704b4f40863e8547ed75060b~mv2.png",
+                    model = "https://static.wixstatic.com/media/0cbe0e_f460b76d704b4f40863e8547ed75060b~mv2.png/v1/fill/w_787,h_302,al_c,lg_1,q_85,enc_avif,quality_auto/0cbe0e_f460b76d704b4f40863e8547ed75060b~mv2.png",
                     contentDescription = "Hey There! Wanna chat?",
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(130.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .clickable { Toast.makeText(context, "Opening Chat...", Toast.LENGTH_SHORT).show() },
+                        .clickable { onOpenChat() },
                     contentScale = ContentScale.Crop
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // --- 6 FEATURE BUTTONS GRID ---
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -690,7 +698,6 @@ fun EchoHomeScreen() {
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // --- QUOTES CAROUSEL (4 Image Cards) ---
                 val quoteImageUrls = listOf(
                     "https://static.wixstatic.com/media/0cbe0e_c2e41586762448feb628d27bc66cfdcb~mv2.png/v1/fill/w_424,h_240,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/0cbe0e_c2e41586762448feb628d27bc66cfdcb~mv2.png",
                     "https://static.wixstatic.com/media/0cbe0e_6789842d789d4f4faae4d78babd083cd~mv2.png/v1/fill/w_424,h_240,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/0cbe0e_6789842d789d4f4faae4d78babd083cd~mv2.png",
@@ -717,6 +724,538 @@ fun EchoHomeScreen() {
 
                 Spacer(modifier = Modifier.height(24.dp))
             }
+        }
+    }
+}
+
+// SCREEN 5: CHAT & VOICE SYSTEM
+
+enum class ChatMode { CHAT, VOICE }
+
+data class Message(
+    val id: String = System.currentTimeMillis().toString(),
+    val text: String,
+    val isUser: Boolean,
+    val timestamp: String
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EchoChatScreen(onBackClicked: () -> Unit) {
+    var activeMode by remember { mutableStateOf(ChatMode.VOICE) }
+    var inputText by remember { mutableStateOf("") }
+    val messages = remember {
+        mutableStateListOf(
+            Message(text = "Hello! I'm Echo, your AI Companion. How can I brighten your day today?", isUser = false, timestamp = "10:00 AM"),
+            Message(text = "Can you tell me a quick uplifting quote?", isUser = true, timestamp = "10:01 AM"),
+            Message(text = "Absolutely! 'Every morning brings new potential, but only if you choose to take the first step.' 😊", isUser = false, timestamp = "10:01 AM")
+        )
+    }
+
+    val coroutineScope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+
+    fun sendMessage() {
+        if (inputText.isNotBlank()) {
+            val userMsg = Message(text = inputText.trim(), isUser = true, timestamp = "Just now")
+            messages.add(userMsg)
+            val textToRespond = inputText
+            inputText = ""
+
+            coroutineScope.launch {
+                listState.animateScrollToItem(messages.size - 1)
+            }
+
+            coroutineScope.launch {
+                kotlinx.coroutines.delay(1000)
+                messages.add(
+                    Message(
+                        text = "I'm right here with you! You said: '$textToRespond'",
+                        isUser = false,
+                        timestamp = "Just now"
+                    )
+                )
+                listState.animateScrollToItem(messages.size - 1)
+            }
+        }
+    }
+
+    Scaffold(
+        containerColor = EchoBgLight,
+        topBar = {
+            Surface(
+                color = EchoBlueHeader,
+                shadowElevation = 4.dp,
+                modifier = Modifier.statusBarsPadding()
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = onBackClicked) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = Color.White
+                            )
+                        }
+
+                        Box {
+                            AsyncImage(
+                                model = echoAvatarUrl,
+                                contentDescription = "Echo Avatar",
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White),
+                                contentScale = ContentScale.Crop
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF4CAF50))
+                                    .align(Alignment.BottomEnd)
+                                    .border(1.5.dp, EchoBlueHeader, CircleShape)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Echo AI",
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (activeMode == ChatMode.CHAT) "Online • Ready to chat" else "Voice Mode Active",
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        IconButton(onClick = { }) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Options",
+                                tint = Color.White
+                            )
+                        }
+                    }
+
+                    ModeToggleBar(
+                        activeMode = activeMode,
+                        onModeSelected = { activeMode = it }
+                    )
+                }
+            }
+        }
+    ) { paddingValues ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
+            when (activeMode) {
+                ChatMode.CHAT -> {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(messages) { message ->
+                                ChatBubbleItem(message = message)
+                            }
+                        }
+
+                        ChatInputBar(
+                            value = inputText,
+                            onValueChange = { inputText = it },
+                            onSend = { sendMessage() },
+                            onMicClicked = { activeMode = ChatMode.VOICE }
+                        )
+                    }
+                }
+
+                ChatMode.VOICE -> {
+                    VoiceModeScreen(
+                        onSwitchToChat = { activeMode = ChatMode.CHAT }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ModeToggleBar(
+    activeMode: ChatMode,
+    onModeSelected: (ChatMode) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 20.dp, bottom = 12.dp)
+            .height(44.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color.White.copy(alpha = 0.2f))
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        val selectedBg = EchoDarkBlueButton
+        val unselectedBg = Color.Transparent
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(20.dp))
+                .background(if (activeMode == ChatMode.CHAT) selectedBg else unselectedBg)
+                .clickable { onModeSelected(ChatMode.CHAT) },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "💬 Chat Mode",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = if (activeMode == ChatMode.CHAT) FontWeight.Bold else FontWeight.Normal
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(20.dp))
+                .background(if (activeMode == ChatMode.VOICE) selectedBg else unselectedBg)
+                .clickable { onModeSelected(ChatMode.VOICE) },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "🎙️ Voice Mode",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = if (activeMode == ChatMode.VOICE) FontWeight.Bold else FontWeight.Normal
+            )
+        }
+    }
+}
+
+@Composable
+fun ChatBubbleItem(message: Message) {
+    val isUser = message.isUser
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
+    ) {
+        Surface(
+            color = if (isUser) EchoUserBubbleColor else EchoAiBubbleColor,
+            shape = RoundedCornerShape(
+                topStart = 18.dp,
+                topEnd = 18.dp,
+                bottomStart = if (isUser) 18.dp else 4.dp,
+                bottomEnd = if (isUser) 4.dp else 18.dp
+            ),
+            shadowElevation = 1.dp,
+            modifier = Modifier.widthIn(max = 280.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = message.text,
+                    color = if (isUser) Color.White else Color(0xFF1E293B),
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = message.timestamp,
+                    color = if (isUser) Color.White.copy(alpha = 0.6f) else EchoSubtextGray,
+                    fontSize = 10.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.align(Alignment.End)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ChatInputBar(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onMicClicked: () -> Unit
+) {
+    Surface(
+        color = Color.White,
+        shadowElevation = 8.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            IconButton(
+                onClick = onMicClicked,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(EchoBgLight)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Mic,
+                    contentDescription = "Switch to Voice",
+                    tint = EchoDarkBlueButton
+                )
+            }
+
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                placeholder = { Text("Type a message...", color = EchoSubtextGray, fontSize = 14.sp) },
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp, max = 100.dp),
+                shape = RoundedCornerShape(24.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = EchoInputFieldBorder,
+                    unfocusedBorderColor = EchoInputFieldBorder.copy(alpha = 0.4f),
+                    focusedContainerColor = EchoBgLight,
+                    unfocusedContainerColor = EchoBgLight
+                ),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { onSend() }),
+                singleLine = false,
+                maxLines = 3
+            )
+
+            IconButton(
+                onClick = onSend,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(if (value.isNotBlank()) EchoDarkBlueButton else EchoSubtextGray.copy(alpha = 0.3f))
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send Message",
+                    tint = Color.White
+                )
+            }
+        }
+    }
+}
+
+// Voice Mode Screen Component with Animated Audio Wave visualizer
+@Composable
+fun VoiceModeScreen(onSwitchToChat: () -> Unit) {
+    var isListening by remember { mutableStateOf(false) }
+    var isMuted by remember { mutableStateOf(false) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "Pulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = if (isListening) 1.25f else 1.05f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "PulseScale"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = if (isListening) "Listening..." else "Tap the mic & speak",
+                color = EchoDarkBlueButton,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = if (isListening) "Echo is active and listening to you" else "Ask Echo anything or just chat",
+                color = EchoSubtextGray,
+                fontSize = 14.sp
+            )
+        }
+
+        // Central Orb Visualizer
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.size(200.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(170.dp)
+                    .scale(pulseScale)
+                    .clip(CircleShape)
+                    .background(EchoBlueHeader.copy(alpha = if (isListening) 0.25f else 0.1f))
+            )
+
+            Card(
+                shape = CircleShape,
+                colors = CardDefaults.cardColors(containerColor = EchoBlueHeader),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                modifier = Modifier
+                    .size(120.dp)
+                    .clickable { isListening = !isListening }
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = echoAvatarUrl,
+                        contentDescription = "Echo Avatar",
+                        modifier = Modifier
+                            .size(90.dp)
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+            }
+        }
+
+        // --- ANIMATED WAVEFORM VISUALIZER BETWEEN AVATAR AND CONTROLS ---
+        AudioWaveformVisualizer(isListening = isListening)
+
+        // Voice Controls Row
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(bottom = 12.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = { isMuted = !isMuted },
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(if (isMuted) Color.Red.copy(alpha = 0.1f) else Color.White)
+                        .border(1.dp, EchoInputFieldBorder.copy(alpha = 0.3f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                        contentDescription = "Mute",
+                        tint = if (isMuted) Color.Red else EchoDarkBlueButton
+                    )
+                }
+
+                Button(
+                    onClick = { isListening = !isListening },
+                    modifier = Modifier.size(72.dp),
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isListening) Color(0xFFE53935) else EchoDarkBlueButton
+                    ),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = "Tap to Speak",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = { },
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .border(1.dp, EchoInputFieldBorder.copy(alpha = 0.3f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.VolumeUp,
+                        contentDescription = "Speaker",
+                        tint = EchoDarkBlueButton
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            TextButton(onClick = onSwitchToChat) {
+                Text(
+                    text = "Switch back to text chat",
+                    color = EchoBlueHeader,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
+// Audio Wave Visualizer Component with Dynamic Bar Animations
+@Composable
+fun AudioWaveformVisualizer(
+    isListening: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val barHeights = listOf(18.dp, 32.dp, 50.dp, 28.dp, 60.dp, 38.dp, 22.dp, 45.dp, 26.dp, 55.dp, 30.dp, 16.dp)
+
+    val infiniteTransition = rememberInfiniteTransition(label = "WaveformTransition")
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(70.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        barHeights.forEachIndexed { index, targetHeight ->
+            val duration = 400 + (index * 80) % 500
+
+            val dynamicScale by infiniteTransition.animateFloat(
+                initialValue = 0.25f,
+                targetValue = if (isListening) 1.0f else 0.25f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = duration, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "BarHeightAnimation_$index"
+            )
+
+            val animatedHeight = if (isListening) {
+                (targetHeight.value * dynamicScale).coerceAtLeast(6f).dp
+            } else {
+                8.dp
+            }
+
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 3.dp)
+                    .width(5.dp)
+                    .height(animatedHeight)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(
+                        if (isListening) EchoBlueHeader.copy(alpha = 0.85f)
+                        else EchoSubtextGray.copy(alpha = 0.3f)
+                    )
+            )
         }
     }
 }
@@ -774,9 +1313,4 @@ fun FeatureGridItemUrl(
             )
         }
     }
-}
-
-// Helper extension function to safely check null or empty strings
-private fun String?.isNull_orEmpty(): Boolean {
-    return this == null || this.trim().isEmpty()
 }
