@@ -1,12 +1,11 @@
 package com.example.echov2
 
 import android.Manifest
-import android.content.Intent
+import android.content.Context
 import android.content.pm.PackageManager
+import android.media.MediaRecorder
+import android.net.Uri
 import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -68,12 +67,34 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.logging.HttpLoggingInterceptor
+import org.json.JSONArray
+import org.json.JSONObject
+import retrofit2.Response
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.http.Body
+import retrofit2.http.POST
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlin.math.sin
 
-// Colors matching the design
+// Colors matching design
 val EchoBlueHeader = Color(0xFF0066FF)
 val EchoDarkBlueButton = Color(0xFF003859)
 val EchoInputFieldBorder = Color(0xFF0B3C4D)
@@ -82,10 +103,62 @@ val EchoUserBubbleColor = Color(0xFF003859)
 val EchoAiBubbleColor = Color(0xFFE8F1FF)
 val EchoBgLight = Color(0xFFF4F7FF)
 
-// Image URL Placeholders
+// Placeholders
 const val promptQuestionBgUrl = "https://static.wixstatic.com/media/0cbe0e_13594cad56364c2eb39a63e87e8b3ca0~mv2.png/v1/fill/w_412,h_890,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/Echo%20Mobile%20UI%20(12).png"
 const val headerRobotImageUrl = "https://static.wixstatic.com/media/0cbe0e_3514bb0897164745bfd2ee85db385309~mv2.png/v1/fill/w_1200,h_676,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/I%20see%20it%20I%20like%20it%20I%20want%20it%20I%20got%20it.png"
 const val echoAvatarUrl = "https://static.wixstatic.com/media/0cbe0e_3514bb0897164745bfd2ee85db385309~mv2.png/v1/fill/w_1200,h_676,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/I%20see%20it%20I%20like%20it%20I%20want%20it%20I%20got%20it.png"
+
+// CONFIGURATIONS
+const val GROQ_API_KEY = BuildConfig.GROQ_API_KEY
+private const val GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+private const val GROQ_STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+private const val GROQ_CHAT_MODEL = "openai/gpt-oss-120b"
+private const val GROQ_STT_MODEL = "whisper-large-v3-turbo"
+
+// RETROFIT PIPELINE DATA MODELS & CLIENT
+data class ProcessSessionRequest(
+    val user_id: String,
+    val session_id: String,
+    val bucket_name: String = "echo-audio-bucket",
+    val gcs_audio_path: String,
+    val transcript: String? = null
+)
+
+data class ProcessSessionResponse(
+    val message: String,
+    val status: String
+)
+
+interface EchoApiService {
+    @POST("api/v1/process-session")
+    suspend fun processSession(
+        @Body request: ProcessSessionRequest
+    ): Response<ProcessSessionResponse>
+}
+
+object NetworkClient {
+    private const val BASE_URL = "https://echo-backend-main.onrender.com/"
+
+    private val loggingInterceptor = HttpLoggingInterceptor().apply {
+        level = HttpLoggingInterceptor.Level.BODY
+    }
+
+    val okHttpClient = OkHttpClient.Builder()
+        .addInterceptor(loggingInterceptor)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    val apiService: EchoApiService by lazy {
+        Retrofit.Builder()
+            .baseUrl(BASE_URL)
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(EchoApiService::class.java)
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -250,7 +323,7 @@ fun SignInScreen(onNavigateToSignUp: () -> Unit, onLoginSuccess: () -> Unit) {
         CustomOutlinedTextField(
             value = email,
             onValueChange = { email = it },
-            placeholder = "Email Adress",
+            placeholder = "Email Address",
             leadingIcon = { Icon(Icons.Outlined.Email, contentDescription = null, tint = EchoSubtextGray) }
         )
 
@@ -362,7 +435,7 @@ fun SignUpScreen(onNavigateToSignIn: () -> Unit, onSignUpSuccess: () -> Unit) {
         CustomOutlinedTextField(
             value = email,
             onValueChange = { email = it },
-            placeholder = "Email Adress",
+            placeholder = "Email Address",
             leadingIcon = { Icon(Icons.Outlined.Email, contentDescription = null, tint = EchoSubtextGray) }
         )
 
@@ -740,7 +813,7 @@ fun EchoHomeScreen(onOpenChat: () -> Unit = {}) {
 }
 
 // ==========================================
-// SCREEN 5: CHAT & VOICE SYSTEM WITH STT & TTS
+// SCREEN 5: CHAT & VOICE SYSTEM WITH DIRECT GROQ WHISPER STT & RENDER BACKEND
 // ==========================================
 
 enum class ChatMode { CHAT, VOICE }
@@ -756,10 +829,14 @@ data class Message(
 @Composable
 fun EchoChatScreen(onBackClicked: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var activeMode by remember { mutableStateOf(ChatMode.VOICE) }
     var inputText by remember { mutableStateOf("") }
-    var isListening by remember { mutableStateOf(false) }
+    var isRecordingAudio by remember { mutableStateOf(false) }
     var isSpeaking by remember { mutableStateOf(false) }
+    var isGeneratingResponse by remember { mutableStateOf(false) }
+
+    val savedGlobalFacts = remember { mutableStateListOf<String>() }
 
     val messages = remember {
         mutableStateListOf(
@@ -773,9 +850,47 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
 
     val listState = rememberLazyListState()
 
-    // =========================================================
-    // TEXT TO SPEECH
-    // =========================================================
+    // --- MEDIARECORDER AUDIO CAPTURE ---
+    var mediaRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var currentAudioFile by remember { mutableStateOf<File?>(null) }
+
+    fun startAudioRecording(): File? {
+        return try {
+            val audioFile = File(context.cacheDir, "session_audio_${System.currentTimeMillis()}.m4a")
+            val recorder = MediaRecorder().apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setOutputFile(audioFile.absolutePath)
+                prepare()
+                start()
+            }
+            mediaRecorder = recorder
+            currentAudioFile = audioFile
+            audioFile
+        } catch (e: Exception) {
+            android.util.Log.e("EchoAudio", "Error starting MediaRecorder", e)
+            null
+        }
+    }
+
+    fun stopAudioRecording(): File? {
+        return try {
+            mediaRecorder?.apply {
+                stop()
+                release()
+            }
+            mediaRecorder = null
+            val savedFile = currentAudioFile
+            currentAudioFile = null
+            savedFile
+        } catch (e: Exception) {
+            android.util.Log.e("EchoAudio", "Error stopping MediaRecorder", e)
+            null
+        }
+    }
+
+    // --- NATIVE TEXT TO SPEECH ---
     var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
     var ttsReady by remember { mutableStateOf(false) }
 
@@ -790,50 +905,21 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
                     languageResult == TextToSpeech.LANG_NOT_SUPPORTED
                 ) {
                     ttsReady = false
-                    android.util.Log.e(
-                        "EchoTTS",
-                        "English TTS language is missing or unsupported"
-                    )
+                    android.util.Log.e("EchoTTS", "English TTS language is missing or unsupported")
                 } else {
                     ttsEngine = tts
                     ttsReady = true
 
                     tts.setOnUtteranceProgressListener(
                         object : android.speech.tts.UtteranceProgressListener() {
-                            override fun onStart(utteranceId: String?) {
-                                isSpeaking = true
-                                android.util.Log.d(
-                                    "EchoTTS",
-                                    "Started speaking: $utteranceId"
-                                )
-                            }
-
-                            override fun onDone(utteranceId: String?) {
-                                isSpeaking = false
-                                android.util.Log.d(
-                                    "EchoTTS",
-                                    "Finished speaking: $utteranceId"
-                                )
-                            }
-
-                            override fun onError(utteranceId: String?) {
-                                isSpeaking = false
-                                android.util.Log.e(
-                                    "EchoTTS",
-                                    "TTS error: $utteranceId"
-                                )
-                            }
+                            override fun onStart(utteranceId: String?) { isSpeaking = true }
+                            override fun onDone(utteranceId: String?) { isSpeaking = false }
+                            override fun onError(utteranceId: String?) { isSpeaking = false }
                         }
                     )
-
-                    android.util.Log.d("EchoTTS", "TTS initialized successfully")
                 }
             } else {
                 ttsReady = false
-                android.util.Log.e(
-                    "EchoTTS",
-                    "TTS initialization failed: $status"
-                )
             }
         }
 
@@ -845,192 +931,315 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
         }
     }
 
-    // Speak the EXACT transcription. No AI is involved.
     fun speakOutLoud(text: String) {
         val cleanText = text.trim()
-
         if (cleanText.isBlank()) return
-
         val tts = ttsEngine
-
-        if (tts == null || !ttsReady) {
-            android.util.Log.e(
-                "EchoTTS",
-                "TTS not ready. tts=$tts, ready=$ttsReady"
-            )
-            Toast.makeText(
-                context,
-                "Text-to-speech is not ready",
-                Toast.LENGTH_SHORT
-            ).show()
-            return
-        }
-
-        val result = tts.speak(
-            cleanText,
-            TextToSpeech.QUEUE_FLUSH,
-            null,
-            "EchoRepeat"
-        )
-
-        android.util.Log.d(
-            "EchoTTS",
-            "Repeating exact transcription: \"$cleanText\" | result=$result"
-        )
+        if (tts == null || !ttsReady) return
+        tts.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, "EchoResponse")
     }
 
-    // =========================================================
-    // SPEECH TO TEXT
-    // =========================================================
-    val speechRecognizer = remember {
-        SpeechRecognizer.createSpeechRecognizer(context)
-    }
-
-    val speechIntent = remember {
-        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-            )
-            putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE,
-                Locale.getDefault()
-            )
-            putExtra(
-                RecognizerIntent.EXTRA_MAX_RESULTS,
-                1
-            )
-        }
-    }
-
-    fun handleTranscription(transcribedText: String) {
-        val cleanText = transcribedText.trim()
-
-        if (cleanText.isBlank()) return
-
-        messages.add(
-            Message(
-                text = cleanText,
-                isUser = true,
-                timestamp = "Just now"
-            )
-        )
-
-        android.util.Log.d(
-            "EchoSTT",
-            "Transcription: \"$cleanText\""
-        )
-
-        speakOutLoud(cleanText)
-    }
-
-    DisposableEffect(Unit) {
-        speechRecognizer.setRecognitionListener(
-            object : RecognitionListener {
-
-                override fun onReadyForSpeech(params: Bundle?) {
-                    isListening = true
-                    android.util.Log.d("EchoSTT", "Ready for speech")
-                }
-
-                override fun onBeginningOfSpeech() {
-                    android.util.Log.d("EchoSTT", "Speech started")
-                }
-
-                override fun onRmsChanged(rmsdB: Float) {}
-
-                override fun onBufferReceived(buffer: ByteArray?) {}
-
-                override fun onEndOfSpeech() {
-                    isListening = false
-                    android.util.Log.d("EchoSTT", "Speech ended")
-                }
-
-                override fun onError(error: Int) {
-                    isListening = false
-
-                    android.util.Log.e(
-                        "EchoSTT",
-                        "SpeechRecognizer error code: $error"
-                    )
-
-                    Toast.makeText(
-                        context,
-                        "Couldn't understand the speech. Please try again.",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-
-                override fun onResults(results: Bundle?) {
-                    isListening = false
-
-                    val matches =
-                        results?.getStringArrayList(
-                            SpeechRecognizer.RESULTS_RECOGNITION
-                        )
-
-                    if (!matches.isNullOrEmpty()) {
-                        handleTranscription(matches[0])
-                    } else {
-                        android.util.Log.e(
-                            "EchoSTT",
-                            "SpeechRecognizer returned no transcription"
-                        )
+    // Load User Facts from Firestore
+    LaunchedEffect(Unit) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (uid != null) {
+            FirebaseFirestore.getInstance().collection("users").document(uid).get()
+                .addOnSuccessListener { doc ->
+                    if (doc != null && doc.exists()) {
+                        val facts = doc.get("globalFacts") as? List<*>
+                        facts?.filterIsInstance<String>()?.let {
+                            savedGlobalFacts.addAll(it)
+                        }
                     }
                 }
-
-                override fun onPartialResults(partialResults: Bundle?) {}
-
-                override fun onEvent(
-                    eventType: Int,
-                    params: Bundle?
-                ) {}
-            }
-        )
-
-        onDispose {
-            speechRecognizer.destroy()
         }
     }
 
-    // =========================================================
-    // MICROPHONE PERMISSION
-    // =========================================================
+    fun extractAndSaveGlobalFacts() {
+        if (messages.size <= 1) return
+        val userUid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val conversationSnapshot = messages.toList()
+
+        scope.launch(Dispatchers.IO) {
+            var connection: HttpURLConnection? = null
+            try {
+                val fullConversation = conversationSnapshot.joinToString("\n") {
+                    val sender = if (it.isUser) "User" else "Echo"
+                    "$sender: ${it.text}"
+                }
+
+                val prompt = """
+                    Analyze this conversation between a user and Echo.
+                    Extract only useful, reasonably stable facts or preferences explicitly stated by the user.
+                    Do not infer sensitive traits. Return only bullet points, each starting with '* '.
+                    If there are no new meaningful facts, return exactly NONE.
+
+                    Conversation:
+                    $fullConversation
+                """.trimIndent()
+
+                connection = (URL(GROQ_CHAT_URL).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 15000
+                    readTimeout = 30000
+                    setRequestProperty("Authorization", "Bearer $GROQ_API_KEY")
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    doOutput = true
+                }
+
+                val payload = JSONObject().apply {
+                    put("model", GROQ_CHAT_MODEL)
+                    put("messages", JSONArray().apply {
+                        put(JSONObject().put("role", "system").put("content",
+                            "Extract stable user facts only when explicitly stated. Return bullet points beginning with * or exactly NONE. Do not infer sensitive traits."))
+                        put(JSONObject().put("role", "user").put("content", prompt))
+                    })
+                    put("temperature", 0.1)
+                    put("max_tokens", 300)
+                }
+
+                connection!!.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+                val status = connection!!.responseCode
+                val responseBody = (if (status in 200..299) connection!!.inputStream else connection!!.errorStream)
+                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
+
+                if (status in 200..299) {
+                    val rawText = JSONObject(responseBody)
+                        .getJSONArray("choices")
+                        .getJSONObject(0)
+                        .getJSONObject("message")
+                        .optString("content", "")
+                        .trim()
+
+                    if (rawText.isNotBlank() && !rawText.equals("NONE", ignoreCase = true)) {
+                        val bulletPoints = rawText.lines()
+                            .map { it.trim().removePrefix("*").removePrefix("-").trim() }
+                            .filter { it.isNotBlank() && !it.equals("NONE", ignoreCase = true) }
+                            .distinct()
+
+                        if (bulletPoints.isNotEmpty()) {
+                            FirebaseFirestore.getInstance().collection("users").document(userUid)
+                                .update("globalFacts", FieldValue.arrayUnion(*bulletPoints.toTypedArray()))
+                            withContext(Dispatchers.Main) {
+                                bulletPoints.forEach { fact -> if (!savedGlobalFacts.contains(fact)) savedGlobalFacts.add(fact) }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("EchoGroqFacts", "Error extracting global facts", e)
+            } finally {
+                connection?.disconnect()
+            }
+        }
+    }
+
+    fun generateGroqResponse(userPrompt: String) {
+        if (isGeneratingResponse) return
+        isGeneratingResponse = true
+        val conversationSnapshot = messages.toList()
+        val factsSnapshot = savedGlobalFacts.toList()
+
+        scope.launch(Dispatchers.IO) {
+            var connection: HttpURLConnection? = null
+            try {
+                connection = (URL(GROQ_CHAT_URL).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 15000
+                    readTimeout = 60000
+                    setRequestProperty("Authorization", "Bearer $GROQ_API_KEY")
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    doOutput = true
+                }
+
+                val apiMessages = JSONArray()
+                apiMessages.put(JSONObject().apply {
+                    put("role", "system")
+                    put("content", "You are Echo, a polite, warm, and supportive AI companion. Keep each response under 120 words without markdown or emojis.")
+                })
+
+                if (factsSnapshot.isNotEmpty()) {
+                    apiMessages.put(JSONObject().apply {
+                        put("role", "system")
+                        put("content", "Facts previously shared:\n" + factsSnapshot.joinToString("\n") { "- $it" })
+                    })
+                }
+
+                conversationSnapshot.forEach { msg ->
+                    apiMessages.put(JSONObject().apply {
+                        put("role", if (msg.isUser) "user" else "assistant")
+                        put("content", msg.text)
+                    })
+                }
+
+                val payload = JSONObject().apply {
+                    put("model", GROQ_CHAT_MODEL)
+                    put("messages", apiMessages)
+                    put("temperature", 0.7)
+                    put("max_tokens", 300)
+                }
+
+                connection!!.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+                val status = connection!!.responseCode
+                val responseBody = (if (status in 200..299) connection!!.inputStream else connection!!.errorStream)
+                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
+
+                if (status in 200..299) {
+                    val aiReply = JSONObject(responseBody)
+                        .getJSONArray("choices")
+                        .getJSONObject(0)
+                        .getJSONObject("message")
+                        .optString("content", "")
+                        .trim()
+
+                    withContext(Dispatchers.Main) {
+                        if (aiReply.isNotBlank()) {
+                            messages.add(Message(text = aiReply, isUser = false, timestamp = "Just now"))
+                            speakOutLoud(aiReply)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("EchoGroq", "Groq chat request failed", e)
+            } finally {
+                connection?.disconnect()
+                withContext(Dispatchers.Main) { isGeneratingResponse = false }
+            }
+        }
+    }
+
+    // --- DIRECT GROQ STT WHISPER-LARGE-V3-TURBO TRANSCRIPTION ---
+    suspend fun transcribeAudioWithGroq(audioFile: File): String? = withContext(Dispatchers.IO) {
+        try {
+            val requestBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("model", GROQ_STT_MODEL)
+                .addFormDataPart(
+                    "file",
+                    audioFile.name,
+                    audioFile.asRequestBody("audio/m4a".toMediaTypeOrNull())
+                )
+                .build()
+
+            val request = Request.Builder()
+                .url(GROQ_STT_URL)
+                .addHeader("Authorization", "Bearer $GROQ_API_KEY")
+                .post(requestBody)
+                .build()
+
+            val response = NetworkClient.okHttpClient.newCall(request).execute()
+            val responseText = response.body?.string().orEmpty()
+
+            if (response.isSuccessful && responseText.isNotBlank()) {
+                val json = JSONObject(responseText)
+                json.optString("text", "").trim()
+            } else {
+                android.util.Log.e("EchoGroqSTT", "Groq STT error: $responseText")
+                null
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("EchoGroqSTT", "Error during Groq STT call", e)
+            null
+        }
+    }
+
+    // --- TRIGGER BACKEND PIPELINE (UPLOAD AUDIO & STUB RECORD) ---
+    fun processVoiceSession(audioFile: File) {
+        val userId = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val sessionId = "session_${System.currentTimeMillis()}"
+        val gcsPath = "users/$userId/sessions/$sessionId/audio.m4a"
+
+        scope.launch(Dispatchers.IO) {
+            // 1. Run direct Kotlin Groq Whisper STT
+            val transcript = transcribeAudioWithGroq(audioFile) ?: ""
+
+            withContext(Dispatchers.Main) {
+                if (transcript.isNotBlank()) {
+                    messages.add(Message(text = transcript, isUser = true, timestamp = "Just now"))
+                    generateGroqResponse(transcript)
+                } else {
+                    Toast.makeText(context, "Could not transcribe audio. Try again.", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            // 2. Persist initial Firestore session stub
+            val sessionRef = FirebaseFirestore.getInstance()
+                .collection("users").document(userId)
+                .collection("sessions").document(sessionId)
+
+            val initialSessionData = hashMapOf(
+                "timestamp" to FieldValue.serverTimestamp(),
+                "status" to "PENDING",
+                "audio_gcs_path" to gcsPath,
+                "raw_transcript" to transcript
+            )
+
+            sessionRef.set(initialSessionData).addOnSuccessListener {
+                // 3. Upload Audio to Firebase Storage
+                val storageRef = FirebaseStorage.getInstance().reference.child(gcsPath)
+                storageRef.putFile(Uri.fromFile(audioFile)).addOnSuccessListener {
+
+                    // 4. Trigger Render Backend Pipeline with supplied transcript
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            val request = ProcessSessionRequest(
+                                user_id = userId,
+                                session_id = sessionId,
+                                bucket_name = "echo-audio-bucket",
+                                gcs_audio_path = gcsPath,
+                                transcript = transcript
+                            )
+                            val response = NetworkClient.apiService.processSession(request)
+                            if (response.isSuccessful) {
+                                android.util.Log.d("EchoPipeline", "Triggered backend for session $sessionId")
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("EchoPipeline", "Failed to call Render API", e)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- PERMISSIONS LAUNCHER ---
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            speechRecognizer.startListening(speechIntent)
+            val startedFile = startAudioRecording()
+            if (startedFile != null) {
+                isRecordingAudio = true
+            }
         } else {
-            Toast.makeText(
-                context,
-                "Microphone permission is required for Voice Mode",
-                Toast.LENGTH_SHORT
-            ).show()
+            Toast.makeText(context, "Microphone permission required", Toast.LENGTH_SHORT).show()
         }
     }
 
-    fun startListeningWithPermission() {
-        if (
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.RECORD_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            ttsEngine?.stop()
-            isSpeaking = false
-
-            speechRecognizer.startListening(speechIntent)
+    fun handleRecordButtonClick() {
+        if (isRecordingAudio) {
+            // Stop recording
+            isRecordingAudio = false
+            val audioFile = stopAudioRecording()
+            if (audioFile != null && audioFile.exists()) {
+                Toast.makeText(context, "Transcribing with Groq...", Toast.LENGTH_SHORT).show()
+                processVoiceSession(audioFile)
+            }
         } else {
-            permissionLauncher.launch(
-                Manifest.permission.RECORD_AUDIO
-            )
+            // Start recording
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                ttsEngine?.stop()
+                isSpeaking = false
+                val startedFile = startAudioRecording()
+                if (startedFile != null) {
+                    isRecordingAudio = true
+                }
+            } else {
+                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
         }
     }
 
-    // =========================================================
-    // UI
-    // =========================================================
     Scaffold(
         containerColor = EchoBgLight,
         topBar = {
@@ -1048,7 +1257,10 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
                             .padding(horizontal = 12.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = onBackClicked) {
+                        IconButton(onClick = {
+                            extractAndSaveGlobalFacts()
+                            onBackClicked()
+                        }) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back",
@@ -1073,11 +1285,7 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
                                     .clip(CircleShape)
                                     .background(Color(0xFF4CAF50))
                                     .align(Alignment.BottomEnd)
-                                    .border(
-                                        1.5.dp,
-                                        EchoBlueHeader,
-                                        CircleShape
-                                    )
+                                    .border(1.5.dp, EchoBlueHeader, CircleShape)
                             )
                         }
 
@@ -1092,10 +1300,7 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
                             )
 
                             Text(
-                                text = if (activeMode == ChatMode.CHAT)
-                                    "Online • Ready to chat"
-                                else
-                                    "Voice Mode Active",
+                                text = if (isGeneratingResponse) "Thinking..." else if (activeMode == ChatMode.CHAT) "Online • Ready to chat" else "Voice Mode Active",
                                 color = Color.White.copy(alpha = 0.8f),
                                 fontSize = 12.sp
                             )
@@ -1124,7 +1329,6 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
                 .padding(paddingValues)
         ) {
             when (activeMode) {
-
                 ChatMode.CHAT -> {
                     Column(modifier = Modifier.fillMaxSize()) {
                         LazyColumn(
@@ -1145,7 +1349,6 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
                             onValueChange = { inputText = it },
                             onSend = {
                                 val cleanText = inputText.trim()
-
                                 if (cleanText.isNotBlank()) {
                                     messages.add(
                                         Message(
@@ -1154,9 +1357,8 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
                                             timestamp = "Just now"
                                         )
                                     )
-
                                     inputText = ""
-                                    speakOutLoud(cleanText)
+                                    generateGroqResponse(cleanText)
                                 }
                             },
                             onMicClicked = {
@@ -1168,19 +1370,10 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
 
                 ChatMode.VOICE -> {
                     VoiceModeScreen(
-                        isListening = isListening,
+                        isRecording = isRecordingAudio,
                         isSpeaking = isSpeaking,
-                        onRecordClick = {
-                            if (isListening) {
-                                speechRecognizer.stopListening()
-                                isListening = false
-                            } else {
-                                startListeningWithPermission()
-                            }
-                        },
-                        onSwitchToChat = {
-                            activeMode = ChatMode.CHAT
-                        }
+                        onRecordClick = { handleRecordButtonClick() },
+                        onSwitchToChat = { activeMode = ChatMode.CHAT }
                     )
                 }
             }
@@ -1350,7 +1543,6 @@ fun ChatInputBar(
     }
 }
 
-// Dynamic Audio Waves Animation Component
 @Composable
 fun AudioWaveformAnimation(
     isActive: Boolean,
@@ -1401,10 +1593,9 @@ fun AudioWaveformAnimation(
     }
 }
 
-// Voice Mode Screen Component
 @Composable
 fun VoiceModeScreen(
-    isListening: Boolean,
+    isRecording: Boolean,
     isSpeaking: Boolean,
     onRecordClick: () -> Unit,
     onSwitchToChat: () -> Unit
@@ -1414,7 +1605,7 @@ fun VoiceModeScreen(
     val infiniteTransition = rememberInfiniteTransition(label = "Pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = if (isListening || isSpeaking) 1.25f else 1.05f,
+        targetValue = if (isRecording || isSpeaking) 1.25f else 1.05f,
         animationSpec = infiniteRepeatable(
             animation = tween(1000, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
@@ -1433,7 +1624,7 @@ fun VoiceModeScreen(
             Spacer(modifier = Modifier.height(16.dp))
             Text(
                 text = when {
-                    isListening -> "Listening..."
+                    isRecording -> "Recording audio..."
                     isSpeaking -> "Echo is speaking..."
                     else -> "Tap the mic & speak"
                 },
@@ -1443,7 +1634,7 @@ fun VoiceModeScreen(
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = if (isListening) "Echo is active and listening to you" else "Ask Echo anything or just chat",
+                text = if (isRecording) "Recording your voice for analysis. Tap stop when finished." else "Ask Echo anything or just chat",
                 color = EchoSubtextGray,
                 fontSize = 14.sp
             )
@@ -1458,7 +1649,7 @@ fun VoiceModeScreen(
                     .size(170.dp)
                     .scale(pulseScale)
                     .clip(CircleShape)
-                    .background(EchoBlueHeader.copy(alpha = if (isListening || isSpeaking) 0.25f else 0.1f))
+                    .background(EchoBlueHeader.copy(alpha = if (isRecording || isSpeaking) 0.25f else 0.1f))
             )
 
             Card(
@@ -1486,7 +1677,7 @@ fun VoiceModeScreen(
         }
 
         AudioWaveformAnimation(
-            isActive = isListening,
+            isActive = isRecording || isSpeaking,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
@@ -1520,13 +1711,13 @@ fun VoiceModeScreen(
                     modifier = Modifier.size(72.dp),
                     shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isListening) Color(0xFFE53935) else EchoDarkBlueButton
+                        containerColor = if (isRecording) Color(0xFFE53935) else EchoDarkBlueButton
                     ),
                     contentPadding = PaddingValues(0.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Tap to Speak",
+                        imageVector = if (isRecording) Icons.Default.MicOff else Icons.Default.Mic,
+                        contentDescription = "Tap to Record",
                         tint = Color.White,
                         modifier = Modifier.size(32.dp)
                     )
