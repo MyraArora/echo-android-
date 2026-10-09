@@ -597,11 +597,11 @@ fun EchoHomeScreen(onOpenChat: () -> Unit = {}) {
 
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             HeaderIconButtonUrl(
-                                imageUrl = "https://via.placeholder.com/40/003859/FFFFFF?text=Bag",
-                                onClick = { Toast.makeText(context, "Shopping Clicked", Toast.LENGTH_SHORT).show() }
+                                imageUrl = "https://cdn-icons-png.flaticon.com/512/1436/1436627.png",
+                                onClick = { Toast.makeText(context, "History Clicked", Toast.LENGTH_SHORT).show() }
                             )
                             HeaderIconButtonUrl(
-                                imageUrl = "https://via.placeholder.com/40/003859/FFFFFF?text=Bell",
+                                imageUrl = "https://cdn-icons-png.flaticon.com/512/1827/1827301.png",
                                 onClick = { Toast.makeText(context, "Notifications Clicked", Toast.LENGTH_SHORT).show() }
                             )
                         }
@@ -634,7 +634,7 @@ fun EchoHomeScreen(onOpenChat: () -> Unit = {}) {
                         )
 
                         HeaderIconButtonUrl(
-                            imageUrl = "https://via.placeholder.com/40/003859/FFFFFF?text=Set",
+                            imageUrl = "https://cdn-icons-png.magnific.com/256/771/771203.png?semt=ais_white_label",
                             onClick = { Toast.makeText(context, "Settings Clicked", Toast.LENGTH_SHORT).show() }
                         )
                     }
@@ -664,19 +664,19 @@ fun EchoHomeScreen(onOpenChat: () -> Unit = {}) {
                     ) {
                         FeatureGridItemUrl(
                             modifier = Modifier.weight(1f),
-                            iconUrl = "https://via.placeholder.com/100/0066FF/FFFFFF?text=Games",
+                            iconUrl = "https://cdn-icons-png.flaticon.com/512/7708/7708371.png",
                             title = "Games",
                             onClick = { Toast.makeText(context, "Games Clicked", Toast.LENGTH_SHORT).show() }
                         )
                         FeatureGridItemUrl(
                             modifier = Modifier.weight(1f),
-                            iconUrl = "https://via.placeholder.com/100/0066FF/FFFFFF?text=Club",
+                            iconUrl = "https://static.thenounproject.com/png/1275974-200.png",
                             title = "Clubhouse",
                             onClick = { Toast.makeText(context, "Clubhouse Clicked", Toast.LENGTH_SHORT).show() }
                         )
                         FeatureGridItemUrl(
                             modifier = Modifier.weight(1f),
-                            iconUrl = "https://via.placeholder.com/100/0066FF/FFFFFF?text=Board",
+                            iconUrl = "https://assets.streamlinehq.com/image/private/w_300,h_300,ar_1/f_auto/v1/icons/business-payments/leaderboard-c2xgbi34v5lkfqcsnn4rls.png/leaderboard-3rvm6vbkyzgye3ova2wwy.png?_a=DATAiZAAZAA0",
                             title = "Leaderboard",
                             onClick = { Toast.makeText(context, "Leaderboard Clicked", Toast.LENGTH_SHORT).show() }
                         )
@@ -688,19 +688,19 @@ fun EchoHomeScreen(onOpenChat: () -> Unit = {}) {
                     ) {
                         FeatureGridItemUrl(
                             modifier = Modifier.weight(1f),
-                            iconUrl = "https://via.placeholder.com/100/0066FF/FFFFFF?text=Remind",
+                            iconUrl = "https://cdn-icons-png.flaticon.com/512/9259/9259956.png",
                             title = "Reminders",
                             onClick = { Toast.makeText(context, "Reminders Clicked", Toast.LENGTH_SHORT).show() }
                         )
                         FeatureGridItemUrl(
                             modifier = Modifier.weight(1f),
-                            iconUrl = "https://via.placeholder.com/100/0066FF/FFFFFF?text=Stories",
+                            iconUrl = "https://static.thenounproject.com/png/3203474-200.png",
                             title = "Stories",
                             onClick = { Toast.makeText(context, "Stories Clicked", Toast.LENGTH_SHORT).show() }
                         )
                         FeatureGridItemUrl(
                             modifier = Modifier.weight(1f),
-                            iconUrl = "https://via.placeholder.com/100/0066FF/FFFFFF?text=Jokes",
+                            iconUrl = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSu94P3xVarIOEwDyxZy11BBAP9ZkelKbetT3C0gi424TnO68nsRQAb50w&s=10",
                             title = "Jokes",
                             onClick = { Toast.makeText(context, "Jokes Clicked", Toast.LENGTH_SHORT).show() }
                         )
