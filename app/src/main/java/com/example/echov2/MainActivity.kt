@@ -358,7 +358,7 @@ fun SignInScreen(onNavigateToSignUp: () -> Unit, onLoginSuccess: () -> Unit) {
                     .addOnCompleteListener { task ->
                         isLoading = false
                         if (task.isSuccessful) {
-                            Toast.makeText(context, "Welcome back!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Welcome back, we missed you!", Toast.LENGTH_SHORT).show()
                             onLoginSuccess()
                         } else {
                             Toast.makeText(context, "Error ${task.exception?.message}", Toast.LENGTH_LONG).show()
@@ -671,7 +671,7 @@ fun EchoHomeScreen(onOpenChat: () -> Unit = {}) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             HeaderIconButtonUrl(
                                 imageUrl = "https://cdn-icons-png.flaticon.com/512/1436/1436627.png",
-                                onClick = { Toast.makeText(context, "History Clicked", Toast.LENGTH_SHORT).show() }
+                                onClick = { Toast.makeText(context, "Conversation History Clicked", Toast.LENGTH_SHORT).show() }
                             )
                             HeaderIconButtonUrl(
                                 imageUrl = "https://cdn-icons-png.flaticon.com/512/1827/1827301.png",
@@ -1158,7 +1158,7 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
                     messages.add(Message(text = transcript, isUser = true, timestamp = "Just now"))
                     generateGroqResponse(transcript)
                 } else {
-                    Toast.makeText(context, "Could not transcribe audio. Try again.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Could not process audio. Try again.", Toast.LENGTH_SHORT).show()
                 }
             }
 
@@ -1222,7 +1222,7 @@ fun EchoChatScreen(onBackClicked: () -> Unit) {
             isRecordingAudio = false
             val audioFile = stopAudioRecording()
             if (audioFile != null && audioFile.exists()) {
-                Toast.makeText(context, "Transcribing with Groq...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Listening...", Toast.LENGTH_SHORT).show()
                 processVoiceSession(audioFile)
             }
         } else {
