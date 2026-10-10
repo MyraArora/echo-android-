@@ -1501,7 +1501,7 @@ fun ChatInputBar(
             ) {
                 Icon(
                     imageVector = Icons.Default.Mic,
-                    contentDescription = "Switch to Voice",
+                    contentDescription = "Switch to voice mode",
                     tint = EchoDarkBlueButton
                 )
             }
