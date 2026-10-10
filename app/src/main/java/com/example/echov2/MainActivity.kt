@@ -361,7 +361,7 @@ fun SignInScreen(onNavigateToSignUp: () -> Unit, onLoginSuccess: () -> Unit) {
                             Toast.makeText(context, "Welcome back!", Toast.LENGTH_SHORT).show()
                             onLoginSuccess()
                         } else {
-                            Toast.makeText(context, "Error: ${task.exception?.message}", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Error ${task.exception?.message}", Toast.LENGTH_LONG).show()
                         }
                     }
             },
@@ -372,7 +372,7 @@ fun SignInScreen(onNavigateToSignUp: () -> Unit, onLoginSuccess: () -> Unit) {
             colors = ButtonDefaults.buttonColors(containerColor = EchoDarkBlueButton),
             enabled = !isLoading
         ) {
-            Text(text = if (isLoading) "Signing in..." else "Sign in", fontSize = 18.sp, color = Color.White)
+            Text(text = if (isLoading) "Signing in" else "Sign in", fontSize = 18.sp, color = Color.White)
         }
 
         Spacer(modifier = Modifier.height(24.dp))
